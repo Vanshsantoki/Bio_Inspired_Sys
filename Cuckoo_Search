@@ -1,0 +1,133 @@
+import numpy as np
+
+# -----------------------------
+# Utility Functions
+# -----------------------------
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+def sigmoid_derivative(x):
+    return x * (1 - x)
+
+def mse(y_true, y_pred):
+    return np.mean((y_true - y_pred) ** 2)
+
+# -----------------------------
+# Simple Feedforward Neural Network (1 hidden layer)
+# -----------------------------
+class SimpleNN:
+    def __init__(self, input_size, hidden_size, output_size, weights=None):
+        if weights is None:
+            # Randomly initialize weights
+            self.w1 = np.random.randn(input_size, hidden_size)
+            self.b1 = np.random.randn(hidden_size)
+            self.w2 = np.random.randn(hidden_size, output_size)
+            self.b2 = np.random.randn(output_size)
+        else:
+            self.w1, self.b1, self.w2, self.b2 = weights
+
+    def forward(self, x):
+        self.z1 = np.dot(x, self.w1) + self.b1
+        self.a1 = sigmoid(self.z1)
+        self.z2 = np.dot(self.a1, self.w2) + self.b2
+        output = sigmoid(self.z2)
+        return output
+
+    def get_weights(self):
+        return [self.w1.copy(), self.b1.copy(), self.w2.copy(), self.b2.copy()]
+
+    def set_weights(self, weights):
+        self.w1, self.b1, self.w2, self.b2 = weights
+
+# -----------------------------
+# Cuckoo Search Algorithm
+# -----------------------------
+def levy_flight(beta=1.5):
+    sigma = (np.math.gamma(1+beta) * np.sin(np.pi*beta/2) / \
+            (np.math.gamma((1+beta)/2) * beta * 2**((beta-1)/2)))**(1/beta)
+    u = np.random.normal(0, sigma)
+    v = np.random.normal(0, 1)
+    step = u / abs(v)**(1/beta)
+    return step
+
+def evaluate_fitness(nn, X, y):
+    predictions = nn.forward(X)
+    return mse(y, predictions)
+
+def random_weights(input_size, hidden_size, output_size):
+    return [
+        np.random.randn(input_size, hidden_size),
+        np.random.randn(hidden_size),
+        np.random.randn(hidden_size, output_size),
+        np.random.randn(output_size)
+    ]
+
+def cuckoo_search_nn(X, y, input_size, hidden_size, output_size,
+                     n=10, pa=0.25, max_iter=50):
+    
+    # Initialize nests (solutions)
+    nests = [random_weights(input_size, hidden_size, output_size) for _ in range(n)]
+    fitness = []
+    for weights in nests:
+        nn = SimpleNN(input_size, hidden_size, output_size, weights)
+        fitness.append(evaluate_fitness(nn, X, y))
+
+    best_idx = np.argmin(fitness)
+    best_weights = nests[best_idx]
+    best_fitness = fitness[best_idx]
+
+    for t in range(max_iter):
+        for i in range(n):
+            # Generate new solution by Levy flight
+            step_size = levy_flight() * (np.array(nests[i][0]).shape[0])
+            new_weights = []
+            for w in nests[i]:
+                new_weights.append(w + step_size * np.random.randn(*w.shape))
+
+            # Evaluate new solution
+            nn_new = SimpleNN(input_size, hidden_size, output_size, new_weights)
+            f_new = evaluate_fitness(nn_new, X, y)
+
+            if f_new < fitness[i]:
+                nests[i] = new_weights
+                fitness[i] = f_new
+
+        # Abandon some nests with probability pa
+        for i in range(n):
+            if np.random.rand() < pa:
+                nests[i] = random_weights(input_size, hidden_size, output_size)
+                nn_tmp = SimpleNN(input_size, hidden_size, output_size, nests[i])
+                fitness[i] = evaluate_fitness(nn_tmp, X, y)
+
+        # Update best solution
+        best_idx = np.argmin(fitness)
+        if fitness[best_idx] < best_fitness:
+            best_fitness = fitness[best_idx]
+            best_weights = nests[best_idx]
+
+        print(f"Iteration {t+1}/{max_iter}, Best Fitness = {best_fitness:.6f}")
+
+    return best_weights, best_fitness
+
+# -----------------------------
+# Example Run: XOR Problem
+# -----------------------------
+if __name__ == "__main__":
+    # XOR Dataset
+    X = np.array([[0,0],[0,1],[1,0],[1,1]])
+    y = np.array([[0],[1],[1],[0]])
+
+    # Train NN with CSA
+    best_weights, best_fitness = cuckoo_search_nn(X, y,
+                                                  input_size=2,
+                                                  hidden_size=4,
+                                                  output_size=1,
+                                                  n=10, pa=0.25, max_iter=30)
+
+    # Test the best solution
+    nn = SimpleNN(2, 4, 1, best_weights)
+    predictions = nn.forward(X)
+
+    print("\nFinal Predictions:")
+    print(predictions)
+    print("Final Fitness (MSE):", best_fitness)
